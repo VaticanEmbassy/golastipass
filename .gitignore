@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+golastipass
 
 # Test binary, build with `go test -c`
 *.test

@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"strconv"
 	"io/ioutil"
+	"path/filepath"
 
 	"github.com/VaticanEmbassy/golastipass/cfg"
 	"github.com/VaticanEmbassy/golastipass/doc"
@@ -93,7 +94,9 @@ func ProcessFile(fname string, ch chan string) int {
 
 
 func processFile(fname string) string {
-	return fmt.Sprintf(".%s.progress", fname)
+	dname := filepath.Dir(fname)
+	bname := filepath.Base(fname)
+	return filepath.Join(dname, fmt.Sprintf(".%s.progress", bname))
 }
 
 

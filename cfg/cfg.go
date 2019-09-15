@@ -1,18 +1,20 @@
 package cfg
 
 import (
+	"fmt"
+	"io/ioutil"
 	"flag"
 )
 
 type Config struct {
 	MappingFile string
+	Mapping string
 	Index string
 	Type string
 	Source int
 	PartitionLevels int
 	PartitionChars string
 	ElasticsearchURL string
-	DocumentSchemaFile string
 	WriterWorkers int
 	LineWorkers int
 	BufferedLines int
@@ -38,13 +40,8 @@ func ReadArgs() (*Config) {
 			"chars to use to generate partition combinations")
 	flag.StringVar(&c.ElasticsearchURL, "elasticsearch-url", "http://127.0.0.1:9200",
 			"URL of the Elasticsearch server or cluster")
-	// TODO: read the mapping from a JSON file.
-	//       (insert a placeholder for the document type)
 	flag.StringVar(&c.MappingFile, "mapping-file", "",
 			"file containing the mapping settings to use")
-	// TODO: read the document schema from a JSON file.
-	flag.StringVar(&c.DocumentSchemaFile, "document-schema-file", "",
-			"file containing the document schema")
 	flag.IntVar(&c.WriterWorkers, "writer-workers", 5,
 			"number of writer workers to spawn")
 	flag.IntVar(&c.LineWorkers, "line-workers", 10,
@@ -57,6 +54,14 @@ func ReadArgs() (*Config) {
 			"megabytes of the bulk request before a flush")
 	flag.Parse()
 	c.Files = flag.Args()
+	c.Mapping = DefaultMapping
+	if c.MappingFile != "" {
+		b, err := ioutil.ReadFile(c.MappingFile)
+		if err != nil {
+			fmt.Printf("unable to read %s file; using default mapping", c.MappingFile)
+		}
+		c.Mapping = string(b)
+	}
 	return &c
 }
 

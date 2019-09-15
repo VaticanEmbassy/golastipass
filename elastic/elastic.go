@@ -113,7 +113,7 @@ func (w *Writer) Add(md *doc.MetaDoc) {
 	if !ok {
 		index = w.defaultIndex
 	}
-	d := elastic.NewBulkIndexRequest().Index(index).Type(md.Type).Doc(md.Doc)
+	d := elastic.NewBulkIndexRequest().Index(index).Doc(md.Doc)
 	w.Processor.Add(d)
 }
 

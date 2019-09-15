@@ -5,6 +5,7 @@
 *.so
 *.dylib
 golastipass
+.*.progress
 
 # Test binary, build with `go test -c`
 *.test

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 	"bufio"
+	"strconv"
+	"io/ioutil"
 
 	"github.com/VaticanEmbassy/golastipass/cfg"
 	"github.com/VaticanEmbassy/golastipass/doc"
@@ -35,7 +37,13 @@ func ProcessLine(writer *elastic.Writer, type_ string, source int,
 
 
 func ProcessFile(fname string, ch chan string) int {
-	file, err := os.Open(fname)
+	var file *os.File
+	var err error
+	if fname == "-" {
+		file = os.Stdin
+	} else {
+		file, err = os.Open(fname)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,10 +52,30 @@ func ProcessFile(fname string, ch chan string) int {
 	start := time.Now()
 	scanner := bufio.NewScanner(file)
 	count := 0
+	saveProgress := false
+	linesToSkip := 0
+	if fname != "-" {
+		saveProgress = true
+		linesToSkip = getProcessedLines(fname)
+	}
+	if linesToSkip != 0 {
+		fmt.Printf("skipping %d lines that were already processed\n", linesToSkip)
+		skipped := 0
+		for scanner.Scan() {
+			skipped += 1
+			if skipped >= linesToSkip {
+				count = skipped
+				break
+			}
+		}
+	}
 	for scanner.Scan() {
 		count += 1
 		line := scanner.Text()
 		ch <- line
+		if (saveProgress && count % 10000 == 0) {
+			storeProgress(fname, count)
+		}
 		if (count % 100000 == 0) {
 			fmt.Println(fmt.Sprintf("processed %d lines of file %s",
 						count, fname))
@@ -57,14 +85,67 @@ func ProcessFile(fname string, ch chan string) int {
 		log.Println(err)
 	}
 
+	removeProgress(fname)
 	fmt.Println(fmt.Sprintf("finished processing %d lines of file %s in %s",
 				count, fname, util.ElapsedTime(start, time.Now())))
 	return count
 }
 
 
+func processFile(fname string) string {
+	return fmt.Sprintf(".%s.progress", fname)
+}
+
+
+func getProcessedLines(fname string) int {
+	var err error
+	fname = processFile(fname)
+	if _, err = os.Stat(fname); os.IsNotExist(err) {
+		return 0
+	}
+	b, err := ioutil.ReadFile(fname)
+	if err != nil {
+		return 0
+	}
+	i, err := strconv.Atoi(string(b))
+	if err != nil {
+		return 0
+	}
+	return i
+
+}
+
+
+func storeProgress(fname string, lines int) bool {
+	fname = processFile(fname)
+	err := ioutil.WriteFile(fname, []byte(fmt.Sprintf("%d", lines)), 0644)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+
+func removeProgress(fname string) bool {
+	var err error
+	fname = processFile(fname)
+	if _, err = os.Stat(fname); os.IsNotExist(err) {
+		return true
+	}
+	err = os.Remove(fname)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+
 func main() {
 	config := cfg.ReadArgs()
+	if len(config.Files) == 0 {
+		fmt.Println("you must specify at least one file to process")
+		os.Exit(1)
+	}
 	writer := elastic.NewWriter(config)
 	start := time.Now()
 	fmt.Print("creating indices, please wait... ")

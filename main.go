@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"io"
 	"fmt"
 	"log"
 	"sync"
@@ -51,7 +52,7 @@ func ProcessFile(fname string, ch chan string) int {
 	defer file.Close()
 
 	start := time.Now()
-	scanner := bufio.NewScanner(file)
+	reader := bufio.NewReader(file)
 	count := 0
 	saveProgress := false
 	linesToSkip := 0
@@ -62,17 +63,25 @@ func ProcessFile(fname string, ch chan string) int {
 	if linesToSkip != 0 {
 		fmt.Printf("skipping %d lines that were already processed\n", linesToSkip)
 		skipped := 0
-		for scanner.Scan() {
+		_, err = reader.ReadString('\n')
+		for {
 			skipped += 1
 			if skipped >= linesToSkip {
 				count = skipped
 				break
 			}
+			if err == io.EOF {
+				break
+			}
+			_, err = reader.ReadString('\n')
 		}
 	}
-	for scanner.Scan() {
+	for {
+		line, err := reader.ReadString('\n')
+		if err == io.EOF {
+			break
+		}
 		count += 1
-		line := scanner.Text()
 		ch <- line
 		if (saveProgress && count % 10000 == 0) {
 			storeProgress(fname, count)
@@ -82,10 +91,6 @@ func ProcessFile(fname string, ch chan string) int {
 						count, fname))
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		log.Println(err)
-	}
-
 	removeProgress(fname)
 	fmt.Println(fmt.Sprintf("finished processing %d lines of file %s in %s",
 				count, fname, util.ElapsedTime(start, time.Now())))

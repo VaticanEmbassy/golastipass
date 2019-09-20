@@ -18,13 +18,11 @@ import (
 	"github.com/VaticanEmbassy/golastipass/elastic"
 )
 
-var wg sync.WaitGroup
-
-
 type Processor struct {
 	config *cfg.Config
 	writer *elastic.Writer
 	linesCh chan string
+	wg sync.WaitGroup
 }
 
 
@@ -38,7 +36,7 @@ func (p* Processor) ProcessLine() {
 				p.writer.Add(&d)
 			}
 		} else {
-			wg.Done()
+			p.wg.Done()
 			return
 		}
 	}
@@ -65,7 +63,7 @@ func (p* Processor) ProcessFile(fname string) int {
 	linesToSkip := 0
 	if fname != "-" {
 		saveProgress = true
-		linesToSkip = getProcessedLines(fname)
+		linesToSkip = p.getProgress(fname)
 	}
 	if linesToSkip != 0 {
 		fmt.Printf("skipping %d lines that were already processed\n", linesToSkip)
@@ -83,6 +81,11 @@ func (p* Processor) ProcessFile(fname string) int {
 			_, err = reader.ReadString('\n')
 		}
 	}
+	canRestore := p.createProgress(fname)
+	if !canRestore {
+		fmt.Printf("unable to write %s file; operation can't be stopped and restored",
+			p.progressFilePath(fname))
+	}
 	for {
 		line, err := reader.ReadString('\n')
 		if err == io.EOF {
@@ -91,30 +94,30 @@ func (p* Processor) ProcessFile(fname string) int {
 		count += 1
 		p.linesCh <- line
 		if (saveProgress && count % 10000 == 0) {
-			storeProgress(fname, count)
+			p.storeProgress(fname, count)
 		}
 		if (count % 100000 == 0) {
 			fmt.Println(fmt.Sprintf("processed %d lines of file %s",
 						count, fname))
 		}
 	}
-	removeProgress(fname)
+	p.removeProgress(fname)
 	fmt.Println(fmt.Sprintf("finished processing %d lines of file %s in %s",
 				count, fname, util.ElapsedTime(start, time.Now())))
 	return count
 }
 
 
-func processFile(fname string) string {
+func (p* Processor) progressFilePath(fname string) string {
 	dname := filepath.Dir(fname)
 	bname := filepath.Base(fname)
 	return filepath.Join(dname, fmt.Sprintf(".%s.progress", bname))
 }
 
 
-func getProcessedLines(fname string) int {
+func (p* Processor) getProgress(fname string) int {
 	var err error
-	fname = processFile(fname)
+	fname = p.progressFilePath(fname)
 	if _, err = os.Stat(fname); os.IsNotExist(err) {
 		return 0
 	}
@@ -131,8 +134,8 @@ func getProcessedLines(fname string) int {
 }
 
 
-func storeProgress(fname string, lines int) bool {
-	fname = processFile(fname)
+func (p* Processor) storeProgress(fname string, lines int) bool {
+	fname = p.progressFilePath(fname)
 	err := ioutil.WriteFile(fname, []byte(fmt.Sprintf("%d", lines)), 0644)
 	if err != nil {
 		return false
@@ -141,9 +144,23 @@ func storeProgress(fname string, lines int) bool {
 }
 
 
-func removeProgress(fname string) bool {
+func (p* Processor) createProgress(fname string) bool {
+	f, err := os.OpenFile(p.progressFilePath(fname),
+				os.O_APPEND |os.O_CREATE | os.O_WRONLY, 0644)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if _, err := f.WriteString(""); err != nil {
+		return false
+	}
+	return true
+}
+
+
+func (p* Processor) removeProgress(fname string) bool {
 	var err error
-	fname = processFile(fname)
+	fname = p.progressFilePath(fname)
 	if _, err = os.Stat(fname); os.IsNotExist(err) {
 		return true
 	}
@@ -171,7 +188,7 @@ func (p* Processor) Run() {
 
 	p.linesCh = make(chan string, p.config.BufferedLines)
 	for w := 1; w <= p.config.LineWorkers; w++ {
-		wg.Add(1)
+		p.wg.Add(1)
 		go p.ProcessLine()
 	}
 
@@ -182,7 +199,7 @@ func (p* Processor) Run() {
 	}
 
 	close(p.linesCh)
-	wg.Wait()
+	p.wg.Wait()
 	p.writer.Close()
 	fmt.Printf("processed %d files in %v\n",
 		count, util.ElapsedTime(start, time.Now()))

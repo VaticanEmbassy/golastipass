@@ -26,18 +26,17 @@ type Config struct {
 
 func ReadArgs() (*Config) {
 	c := Config{}
-	partitionChars := "abcdefghijklmnopqrstuvwxyz"
-	partitionChars += "0123456789"
+	partitionChars := "abcdefghijklmnopqrstuvwxyz0123456789"
 	flag.StringVar(&c.Index, "index", "pwd_",
 			"name (or prefix) of the index")
 	flag.StringVar(&c.Type, "type", "account",
 			"type of the documents")
-	flag.IntVar(&c.Source, "source", 1,
+	flag.IntVar(&c.Source, "source", 0,
 			"a number representing the source of the documents")
 	flag.IntVar(&c.PartitionLevels, "partition-levels", 1,
 			"levels of [a-zA-Z0-9] (plus 'misc') partitions to create")
 	flag.StringVar(&c.PartitionChars, "partition-chars", partitionChars,
-			"chars to use to generate partition combinations")
+			"chars used to generate partition combinations")
 	flag.StringVar(&c.ElasticsearchURL, "elasticsearch-url", "http://127.0.0.1:9200",
 			"URL of the Elasticsearch server or cluster")
 	flag.StringVar(&c.MappingFile, "mapping-file", "",

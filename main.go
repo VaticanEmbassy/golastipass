@@ -21,14 +21,21 @@ import (
 var wg sync.WaitGroup
 
 
-func ProcessLine(writer *elastic.Writer, type_ string, source int,
-		partitionLevels int, lines chan string) {
+type Processor struct {
+	config *cfg.Config
+	writer *elastic.Writer
+	linesCh chan string
+}
+
+
+func (p* Processor) ProcessLine() {
 	for {
-		line, ok := <- lines
+		line, ok := <- p.linesCh
 		if ok {
-			d, err := doc.ParseLine(line, type_, source, partitionLevels)
+			d, err := doc.ParseLine(line, p.config.Type, p.config.Source,
+			p.config.PartitionLevels)
 			if err == nil {
-				writer.Add(&d)
+				p.writer.Add(&d)
 			}
 		} else {
 			wg.Done()
@@ -38,7 +45,7 @@ func ProcessLine(writer *elastic.Writer, type_ string, source int,
 }
 
 
-func ProcessFile(fname string, ch chan string) int {
+func (p* Processor) ProcessFile(fname string) int {
 	var file *os.File
 	var err error
 	if fname == "-" {
@@ -82,7 +89,7 @@ func ProcessFile(fname string, ch chan string) int {
 			break
 		}
 		count += 1
-		ch <- line
+		p.linesCh <- line
 		if (saveProgress && count % 10000 == 0) {
 			storeProgress(fname, count)
 		}
@@ -148,36 +155,53 @@ func removeProgress(fname string) bool {
 }
 
 
+func (p* Processor) CreateIndices() {
+	start := time.Now()
+	fmt.Print("creating indices, please wait... ")
+	indicesNr := p.writer.CreateIndices()
+	fmt.Printf("created %d indices in %s.\n", indicesNr,
+		util.ElapsedTime(start, time.Now()))
+}
+
+
+func (p* Processor) Run() {
+	p.writer = elastic.NewWriter(p.config)
+	p.CreateIndices()
+	start := time.Now()
+
+	p.linesCh = make(chan string, p.config.BufferedLines)
+	for w := 1; w <= p.config.LineWorkers; w++ {
+		wg.Add(1)
+		go p.ProcessLine()
+	}
+
+	count := 0
+	for _, fname := range p.config.Files {
+		count += 1
+		p.ProcessFile(fname)
+	}
+
+	close(p.linesCh)
+	wg.Wait()
+	p.writer.Close()
+	fmt.Printf("processed %d files in %v\n",
+		count, util.ElapsedTime(start, time.Now()))
+}
+
+
+func NewProcessor(config *cfg.Config) *Processor {
+	p := new(Processor)
+	p.config = config
+	return p
+}
+
+
 func main() {
 	config := cfg.ReadArgs()
 	if len(config.Files) == 0 {
 		fmt.Println("you must specify at least one file to process")
 		os.Exit(1)
 	}
-	writer := elastic.NewWriter(config)
-	start := time.Now()
-	fmt.Print("creating indices, please wait... ")
-	indicesNr := writer.CreateIndices()
-	fmt.Printf("created %d indices in %s.\n", indicesNr,
-		util.ElapsedTime(start, time.Now()))
-	start = time.Now()
-
-	ch := make(chan string, config.BufferedLines)
-	for w := 1; w <= config.LineWorkers; w++ {
-		wg.Add(1)
-		go ProcessLine(writer, config.Type, config.Source,
-				config.PartitionLevels, ch)
-	}
-
-	count := 0
-	for _, fname := range config.Files {
-		count += 1
-		ProcessFile(fname, ch)
-	}
-
-	close(ch)
-	wg.Wait()
-	writer.Close()
-	fmt.Printf("processed %d files in %v\n",
-		count, util.ElapsedTime(start, time.Now()))
+	p := NewProcessor(config)
+	p.Run()
 }
